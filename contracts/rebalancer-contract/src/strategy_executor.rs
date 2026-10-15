@@ -1,7 +1,8 @@
+use crate::fee_calculator::{fee_for_amount, DEFAULT_FEE_BPS};
 use crate::logging::log_trade;
 use crate::slippage_predictor::predict_slippage;
 use crate::{ExecutionReport, ExecutionStrategy, Trade, TradeReceipt, TradeStatus};
-use soroban_sdk::{Env, U256, Vec};
+use soroban_sdk::{Env, Vec, U256};
 
 pub const ERROR_ZERO_AMOUNT: u32 = 1;
 pub const ERROR_IDENTICAL_ASSETS: u32 = 2;
@@ -55,7 +56,8 @@ pub fn execute_strategy(
             continue;
         }
 
-        let fee = trade.amount / 1000;
+        let fee =
+            fee_for_amount(trade.amount, DEFAULT_FEE_BPS).expect("the default fee rate is valid");
         total_fees = total_fees.saturating_add(fee);
 
         let slippage = predict_slippage(trade.asset_pair.clone(), trade.amount, env);
@@ -110,7 +112,10 @@ mod tests {
             assert_eq!(report.trades_failed, 0);
             assert_eq!(report.total_fees, 1);
             assert_eq!(report.trade_statuses.len(), 1);
-            assert_eq!(report.trade_statuses.get(0).unwrap().status, TradeStatus::Success);
+            assert_eq!(
+                report.trade_statuses.get(0).unwrap().status,
+                TradeStatus::Success
+            );
         });
     }
 
@@ -138,8 +143,14 @@ mod tests {
             assert_eq!(report.trades_executed, 1);
             assert_eq!(report.trades_failed, 2);
             assert_eq!(report.trade_statuses.len(), 3);
-            assert_eq!(report.trade_statuses.get(1).unwrap().error_code, Some(ERROR_IDENTICAL_ASSETS));
-            assert_eq!(report.trade_statuses.get(2).unwrap().error_code, Some(ERROR_ZERO_AMOUNT));
+            assert_eq!(
+                report.trade_statuses.get(1).unwrap().error_code,
+                Some(ERROR_IDENTICAL_ASSETS)
+            );
+            assert_eq!(
+                report.trade_statuses.get(2).unwrap().error_code,
+                Some(ERROR_ZERO_AMOUNT)
+            );
         });
     }
 }

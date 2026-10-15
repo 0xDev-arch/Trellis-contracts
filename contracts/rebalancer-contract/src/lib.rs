@@ -90,13 +90,33 @@ impl MultiAssetRebalancer {
                 total_slippage = total_slippage.saturating_add(slippage_val);
 
                 let (status, fee, error_code) = if trade.amount == 0 {
-                    (TradeStatus::Failed, 0, Some(strategy_executor::ERROR_ZERO_AMOUNT))
+                    (
+                        TradeStatus::Failed,
+                        0,
+                        Some(strategy_executor::ERROR_ZERO_AMOUNT),
+                    )
                 } else if trade.asset_pair.0 == trade.asset_pair.1 {
-                    (TradeStatus::Failed, 0, Some(strategy_executor::ERROR_IDENTICAL_ASSETS))
+                    (
+                        TradeStatus::Failed,
+                        0,
+                        Some(strategy_executor::ERROR_IDENTICAL_ASSETS),
+                    )
                 } else if trade.amount > 10_000_000_000 {
-                    (TradeStatus::Failed, 0, Some(strategy_executor::ERROR_EXCEEDS_CAPACITY))
+                    (
+                        TradeStatus::Failed,
+                        0,
+                        Some(strategy_executor::ERROR_EXCEEDS_CAPACITY),
+                    )
                 } else {
-                    (TradeStatus::Success, trade.amount / 1000, None)
+                    (
+                        TradeStatus::Success,
+                        fee_calculator::fee_for_amount(
+                            trade.amount,
+                            fee_calculator::DEFAULT_FEE_BPS,
+                        )
+                        .expect("the default fee rate is valid"),
+                        None,
+                    )
                 };
 
                 trade_statuses.push_back(TradeReceipt {
