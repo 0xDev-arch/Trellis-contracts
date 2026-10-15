@@ -27,10 +27,13 @@ use soroban_sdk::{
     Vec,
 };
 
+pub mod storage;
+
 use shared::auth;
 use shared::events;
 use shared::storage::{instance_get, instance_set, persistent_read, persistent_set};
 use shared::utils::{is_expired, now};
+use storage::{DataKey, PendingRefunds};
 
 // ===========================================================================
 // Marketplace-local error codes
@@ -295,6 +298,20 @@ fn emit_action(env: &Env, caller: &Address, action: Symbol) {
         caller,
         true,
         env.ledger().timestamp(),
+    );
+}
+
+fn emit_bid_refund_credited(env: &Env, bidder: &Address, token: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("nft_mkt"), symbol_short!("ref_crd")),
+        (bidder.clone(), token.clone(), amount),
+    );
+}
+
+fn emit_bid_refund_claimed(env: &Env, bidder: &Address, token: &Address, amount: i128) {
+    env.events().publish(
+        (symbol_short!("nft_mkt"), symbol_short!("ref_clm")),
+        (bidder.clone(), token.clone(), amount),
     );
 }
 
@@ -1027,8 +1044,8 @@ impl NftMarketplace {
         // Refund previous bidder
         if auction.current_bid > 0 {
             let prev = auction.current_bidder.clone();
-            let pc = token::Client::new(&env, &auction.currency);
-            pc.transfer(&env.current_contract_address(), &prev, &auction.current_bid);
+            PendingRefunds::add(&env, &prev, &auction.currency, auction.current_bid)?;
+            emit_bid_refund_credited(&env, &prev, &auction.currency, auction.current_bid);
         }
 
         // Escrow new bid
@@ -1331,6 +1348,27 @@ impl NftMarketplace {
 
     pub fn get_auction(env: Env, auction_id: u64) -> Result<Auction, MarketError> {
         persistent_read(&env, &auction_key(auction_id)).ok_or(MarketError::ListingNotFound)
+    }
+
+    pub fn claim_bid_refund(env: Env, bidder: Address, token: Address) -> Result<(), MarketError> {
+        bidder.require_auth();
+
+        let refund_amount = PendingRefunds::get(&env, &bidder, &token);
+        if refund_amount <= 0 {
+            return Err(MarketError::InvalidAmount);
+        }
+
+        PendingRefunds::clear(&env, &bidder, &token);
+
+        let pc = token::Client::new(&env, &token);
+        pc.transfer(&env.current_contract_address(), &bidder, &refund_amount);
+
+        emit_bid_refund_claimed(&env, &bidder, &token, refund_amount);
+        Ok(())
+    }
+
+    pub fn get_pending_refund(env: Env, bidder: Address, token: Address) -> i128 {
+        PendingRefunds::get(&env, &bidder, &token)
     }
 
     // -----------------------------------------------------------------------
@@ -2028,7 +2066,12 @@ mod tests {
         let a = c.get_auction(&aid);
         assert_eq!(a.current_bid, 1_100);
         assert_eq!(a.current_bidder, b2);
-        assert_eq!(m.currency_client.balance(&b1), 100_000); // refunded
+        assert_eq!(c.get_pending_refund(&b1, &m.currency), 1_000);
+        assert_eq!(m.currency_client.balance(&b1), 99_000); // not yet claimed
+
+        c.claim_bid_refund(&b1, &m.currency);
+        assert_eq!(c.get_pending_refund(&b1, &m.currency), 0);
+        assert_eq!(m.currency_client.balance(&b1), 100_000); // claimed refund
 
         m.env.ledger().with_mut(|l| l.timestamp += 4_000);
         c.settle_english_auction(&aid);
@@ -2560,5 +2603,104 @@ mod tests {
             ),
             Err(Ok(MarketError::InvalidDutchAuctionPrices))
         );
+    }
+
+    #[test]
+    fn pull_based_refund_accumulates_and_can_be_claimed() {
+        let m = setup();
+        init(&m);
+        let c = client(&m);
+        let seller = fresh_user(&m);
+        let b1 = fresh_user(&m);
+        let b2 = fresh_user(&m);
+        let b3 = fresh_user(&m);
+        m.nft_asset.mint(&seller, &10);
+        m.currency_asset.mint(&b1, &100_000);
+        m.currency_asset.mint(&b2, &100_000);
+        m.currency_asset.mint(&b3, &100_000);
+
+        let aid = c.create_english_auction(
+            &seller,
+            &m.nft_collection,
+            &1,
+            &1,
+            &1_000,
+            &m.currency,
+            &3_600,
+            &mk_hash(&m.env),
+        );
+
+        // b1 places first bid
+        c.place_bid(&b1, &aid, &1_000);
+        assert_eq!(c.get_pending_refund(&b1, &m.currency), 0);
+
+        // b2 outbids b1
+        c.place_bid(&b2, &aid, &1_200);
+        assert_eq!(c.get_pending_refund(&b1, &m.currency), 1_000);
+
+        // b1 outbids b2 with another bid
+        c.place_bid(&b1, &aid, &1_500);
+        assert_eq!(c.get_pending_refund(&b2, &m.currency), 1_200);
+
+        // b3 outbids b1
+        c.place_bid(&b3, &aid, &1_800);
+        // b1 now has accumulated refunds: 1_000 + 1_500 = 2_500
+        assert_eq!(c.get_pending_refund(&b1, &m.currency), 2_500);
+
+        // Claiming with zero balance should fail
+        let stranger = fresh_user(&m);
+        assert_eq!(
+            c.try_claim_bid_refund(&stranger, &m.currency),
+            Err(Ok(MarketError::InvalidAmount))
+        );
+
+        // b1 claims accumulated refund
+        let b1_bal_before = m.currency_client.balance(&b1);
+        c.claim_bid_refund(&b1, &m.currency);
+        assert_eq!(c.get_pending_refund(&b1, &m.currency), 0);
+        assert_eq!(m.currency_client.balance(&b1), b1_bal_before + 2_500);
+
+        // b1 cannot claim again (now zero)
+        assert_eq!(
+            c.try_claim_bid_refund(&b1, &m.currency),
+            Err(Ok(MarketError::InvalidAmount))
+        );
+    }
+
+    #[test]
+    fn auction_cannot_be_locked_by_outbid_bidder_no_inline_transfer() {
+        let m = setup();
+        init(&m);
+        let c = client(&m);
+        let seller = fresh_user(&m);
+        // b1 simulates an address that cannot receive inline transfers (e.g. frozen/revoked trustline or contract)
+        let b1 = fresh_user(&m);
+        let b2 = fresh_user(&m);
+        m.nft_asset.mint(&seller, &10);
+        m.currency_asset.mint(&b1, &100_000);
+        m.currency_asset.mint(&b2, &100_000);
+
+        let aid = c.create_english_auction(
+            &seller,
+            &m.nft_collection,
+            &1,
+            &1,
+            &1_000,
+            &m.currency,
+            &3_600,
+            &mk_hash(&m.env),
+        );
+
+        // b1 bids
+        c.place_bid(&b1, &aid, &1_000);
+
+        // With pull-based refunds, place_bid NEVER transfers tokens to previous bidders during bid placement.
+        // Therefore, subsequent valid bids from b2 succeed immediately without reverting, preventing DoS.
+        c.place_bid(&b2, &aid, &1_200);
+
+        let a = c.get_auction(&aid);
+        assert_eq!(a.current_bid, 1_200);
+        assert_eq!(a.current_bidder, b2);
+        assert_eq!(c.get_pending_refund(&b1, &m.currency), 1_000);
     }
 }
