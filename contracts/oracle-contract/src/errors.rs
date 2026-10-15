@@ -31,4 +31,21 @@ pub enum OracleError {
     InvalidQuorum = 511,
     /// The feed does not currently have enough active submissions to meet quorum.
     InsufficientQuorum = 512,
+    /// The submitter stake is below the required minimum.
+    InsufficientStake = 513,
+    /// An unbonding cooldown period is still active.
+    UnbondingCooldownActive = 514,
+    /// No unbonding request was found.
+    NoUnbondingRequest = 515,
+    /// The slash penalty amount is invalid or exceeds the available stake.
+    InvalidPenaltyAmount = 516,
+    /// Treasury contract is not configured or invalid.
+    TreasuryNotConfigured = 517,
+    /// Staking configuration has not been set.
+    StakingConfigNotSet = 518,
+    /// Submitter is already in the process of unbonding.
+    AlreadyUnbonding = 519,
+    /// Math overflow occurred.
+    Overflow = 520,
 }
+

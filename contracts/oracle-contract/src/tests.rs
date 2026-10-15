@@ -857,3 +857,187 @@ fn test_is_submitter_active_status() {
     assert!(!client.is_submitter_active(&fx.submitter1));
 }
 
+fn create_token_contract<'a>(
+    env: &'a Env,
+    admin: &Address,
+) -> (Address, token::Client<'a>, token::StellarAssetClient<'a>) {
+    let contract_address = env.register_stellar_asset_contract(admin.clone());
+    let client = token::Client::new(env, &contract_address);
+    let asset_client = token::StellarAssetClient::new(env, &contract_address);
+    (contract_address, client, asset_client)
+}
+
+#[test]
+fn test_staking_enforcement_on_price_submission() {
+    let fx = setup();
+    let client = OracleContractClient::new(&fx.env, &fx.contract_id);
+
+    let (token_addr, token_client, token_asset) = create_token_contract(&fx.env, &fx.admin);
+    let treasury = Address::generate(&fx.env);
+    let min_stake = 500_i128;
+    let cooldown = 3600_u64;
+
+    // Configure staking and treasury
+    client.set_staking_config(&fx.admin, &token_addr, &min_stake, &cooldown);
+    client.set_treasury(&fx.admin, &treasury);
+
+    // Register submitter1 without stake initially
+    client.register_submitter(&fx.admin, &fx.submitter1);
+
+    // Submitter should NOT be active because stake is 0 < min_stake
+    assert!(!client.is_submitter_active(&fx.submitter1));
+    assert_eq!(client.get_stake(&fx.submitter1), 0);
+
+    // Trying to submit price without stake fails with SubmitterNotAuthorized
+    let feed_id = symbol_short!("BTCUSD");
+    let ts = fx.env.ledger().timestamp();
+    let res = client.try_submit_price(&fx.submitter1, &feed_id, &50_000_i128, &2u32, &ts, &1u64);
+    assert_eq!(res, Err(Ok(OracleError::SubmitterNotAuthorized)));
+
+    // Mint tokens to submitter1 and stake partially (< min_stake)
+    token_asset.mint(&fx.submitter1, &1000_i128);
+    client.stake(&fx.submitter1, &200_i128);
+    assert_eq!(client.get_stake(&fx.submitter1), 200_i128);
+    assert_eq!(token_client.balance(&fx.submitter1), 800_i128);
+    assert!(!client.is_submitter_active(&fx.submitter1));
+
+    // Still cannot submit price
+    let res = client.try_submit_price(&fx.submitter1, &feed_id, &50_000_i128, &2u32, &ts, &1u64);
+    assert_eq!(res, Err(Ok(OracleError::SubmitterNotAuthorized)));
+
+    // Stake remaining to meet min_stake
+    client.stake(&fx.submitter1, &300_i128);
+    assert_eq!(client.get_stake(&fx.submitter1), 500_i128);
+    assert!(client.is_submitter_active(&fx.submitter1));
+
+    // Register second submitter with stake directly
+    token_asset.mint(&fx.submitter2, &1000_i128);
+    client.register_submitter_with_stake(&fx.admin, &fx.submitter2, &500_i128);
+    assert!(client.is_submitter_active(&fx.submitter2));
+    assert_eq!(client.get_stake(&fx.submitter2), 500_i128);
+
+    // Both submitters can now submit prices
+    let sub1_res = client.try_submit_price(&fx.submitter1, &feed_id, &50_000_i128, &2u32, &ts, &1u64);
+    assert!(sub1_res.is_ok());
+
+    let sub2_res = client.try_submit_price(&fx.submitter2, &feed_id, &51_000_i128, &2u32, &ts, &1u64);
+    assert!(sub2_res.is_ok());
+
+    let latest = client.get_latest_price(&feed_id);
+    assert_eq!(latest.price, 50_500_i128);
+}
+
+#[test]
+fn test_slash_submitter_execution_and_treasury_transfer() {
+    let fx = setup();
+    let client = OracleContractClient::new(&fx.env, &fx.contract_id);
+
+    let (token_addr, token_client, token_asset) = create_token_contract(&fx.env, &fx.admin);
+    let treasury = Address::generate(&fx.env);
+    let min_stake = 1_000_i128;
+    let cooldown = 3600_u64;
+
+    client.set_staking_config(&fx.admin, &token_addr, &min_stake, &cooldown);
+    client.set_treasury(&fx.admin, &treasury);
+
+    token_asset.mint(&fx.submitter1, &2_000_i128);
+    client.register_submitter_with_stake(&fx.admin, &fx.submitter1, &1_500_i128);
+
+    assert_eq!(client.get_stake(&fx.submitter1), 1_500_i128);
+    assert_eq!(token_client.balance(&treasury), 0_i128);
+    assert!(client.is_submitter_active(&fx.submitter1));
+
+    // Non-governance / non-admin cannot slash
+    let unauthorized = Address::generate(&fx.env);
+    let slash_err = client.try_slash_submitter(
+        &unauthorized,
+        &fx.submitter1,
+        &500_i128,
+        &symbol_short!("bad_data"),
+    );
+    assert_eq!(slash_err, Err(Ok(OracleError::Unauthorized)));
+
+    // Slash 600 collateral for malicious/off-market price
+    client.slash_submitter(
+        &fx.admin,
+        &fx.submitter1,
+        &600_i128,
+        &symbol_short!("bad_data"),
+    );
+
+    // Remaining stake is 900, which is below min_stake (1000)
+    assert_eq!(client.get_stake(&fx.submitter1), 900_i128);
+    // Collateral directed to Treasury reserve
+    assert_eq!(token_client.balance(&treasury), 600_i128);
+    // Oracle contract holds remaining 900
+    assert_eq!(token_client.balance(&fx.contract_id), 900_i128);
+
+    // Submitter can no longer submit prices because stake < min_stake
+    assert!(!client.is_submitter_active(&fx.submitter1));
+    let feed_id = symbol_short!("BTCUSD");
+    let ts = fx.env.ledger().timestamp();
+    let res = client.try_submit_price(&fx.submitter1, &feed_id, &50_000_i128, &2u32, &ts, &1u64);
+    assert_eq!(res, Err(Ok(OracleError::SubmitterNotAuthorized)));
+}
+
+#[test]
+fn test_unstake_unbonding_cooldown_and_withdraw() {
+    let fx = setup();
+    let client = OracleContractClient::new(&fx.env, &fx.contract_id);
+
+    let (token_addr, token_client, token_asset) = create_token_contract(&fx.env, &fx.admin);
+    let min_stake = 500_i128;
+    let cooldown = 3600_u64;
+
+    client.set_staking_config(&fx.admin, &token_addr, &min_stake, &cooldown);
+
+    token_asset.mint(&fx.submitter1, &1_000_i128);
+    client.register_submitter_with_stake(&fx.admin, &fx.submitter1, &500_i128);
+    assert!(client.is_submitter_active(&fx.submitter1));
+
+    // Initiate unstake
+    client.unstake(&fx.submitter1);
+
+    // Submitter is no longer active once unstaked
+    assert!(!client.is_submitter_active(&fx.submitter1));
+    assert_eq!(client.get_stake(&fx.submitter1), 0);
+
+    let unbonding = client.get_unbonding(&fx.submitter1).unwrap();
+    assert_eq!(unbonding.amount, 500_i128);
+    let unlock_time = unbonding.unlock_time;
+    assert_eq!(unlock_time, fx.env.ledger().timestamp() + cooldown);
+
+    // Cannot initiate another unstake while already unbonding
+    assert_eq!(
+        client.try_unstake(&fx.submitter1),
+        Err(Ok(OracleError::AlreadyUnbonding))
+    );
+
+    // Attempting to withdraw before cooldown expires fails with UnbondingCooldownActive
+    assert_eq!(
+        client.try_withdraw_unbonded(&fx.submitter1),
+        Err(Ok(OracleError::UnbondingCooldownActive))
+    );
+
+    // Fast-forward time to before unlock_time
+    fx.env.ledger().set_timestamp(unlock_time - 1);
+    assert_eq!(
+        client.try_withdraw_unbonded(&fx.submitter1),
+        Err(Ok(OracleError::UnbondingCooldownActive))
+    );
+
+    // Fast-forward time to exact unlock_time
+    fx.env.ledger().set_timestamp(unlock_time);
+    client.withdraw_unbonded(&fx.submitter1);
+
+    // Collateral tokens returned to submitter1
+    assert_eq!(token_client.balance(&fx.submitter1), 1_000_i128);
+    assert_eq!(client.get_unbonding(&fx.submitter1), None);
+
+    // Trying to withdraw again fails with NoUnbondingRequest
+    assert_eq!(
+        client.try_withdraw_unbonded(&fx.submitter1),
+        Err(Ok(OracleError::NoUnbondingRequest))
+    );
+}
+
