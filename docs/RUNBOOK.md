@@ -113,6 +113,9 @@ cargo test -p shared compat:: -- --nocapture
   record. Redeploy the current build; do **not** hand-edit ledger entries.
 - `SchemaMigrationFailed` on write → validate the record shape and re-run the
   migration path described in [`COMPATIBILITY.md`](./COMPATIBILITY.md).
+- To backfill legacy records or reconcile missing derived indexes, run the
+  operator-safe [Backfill Tool](BACKFILL_TOOL.md):
+  `./scripts/backfill.sh --module <mod> --input <file> [--dry-run | --apply]`.
 
 ### 3.5 Upgrade
 
