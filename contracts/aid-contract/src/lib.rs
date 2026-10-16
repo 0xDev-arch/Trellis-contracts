@@ -54,10 +54,15 @@ pub mod types;
 
 use storage::{get_aid, get_aid_counter, has_aid, set_aid, set_aid_counter};
 
-pub use types::{AidPage, AidPageResponse, AidRecord, AidStatus, SearchIndexRepairReport};
+pub use types::{
+    AidPage, AidPageResponse, AidRecord, AidStatus, BatchAidAllocation, SearchIndexRepairReport,
+};
 
 #[allow(dead_code)]
 const MAX_QUERY_LIMIT: u32 = 50;
+
+/// Maximum number of allocations permitted in a single batch creation call.
+pub const MAX_BATCH_SIZE: u32 = 50;
 
 // ---------------------------------------------------------------------------
 // Contract-specific error codes (range 100-199 per shared conventions)
@@ -85,6 +90,10 @@ pub enum AidError {
     SchemaMigrationFailed = 110,
     /// A supplied argument is structurally invalid.
     InvalidArgument = 111,
+    /// The batch allocation exceeds the maximum allowed operations.
+    BatchTooLarge = 112,
+    /// The batch contains no allocations.
+    EmptyBatch = 113,
 }
 
 #[contract]
@@ -314,6 +323,148 @@ impl AidContract {
         token::Client::new(&env, &token).transfer(&donor, &env.current_contract_address(), &amount);
 
         aid_id
+    }
+
+    /// Create multiple aid disbursements atomically in a single transaction.
+    ///
+    /// Consolidates token transfer from `donor` to the contract into a single
+    /// transfer call for `sum(amounts)`. If any allocation fails validation,
+    /// the entire batch reverts atomically without writing state or moving funds.
+    ///
+    /// # Arguments
+    /// * `donor` - The donor address providing the escrow funds.
+    /// * `token` - The escrow token address (must match contract configuration).
+    /// * `allocations` - List of recipient allocations (up to [`MAX_BATCH_SIZE`]).
+    ///
+    /// # Errors
+    /// * [`AidError::Paused`] - If the contract is paused.
+    /// * [`AidError::EmptyBatch`] - If `allocations` is empty.
+    /// * [`AidError::BatchTooLarge`] - If `allocations.len() > MAX_BATCH_SIZE`.
+    /// * [`AidError::NotFound`] - If the contract token is not configured.
+    /// * [`AidError::InvalidArgument`] - If `token` does not match configured token,
+    ///   or any allocation has `amount <= 0`, `expiry_ledger <= current_ledger`,
+    ///   or integer overflow occurs.
+    /// * [`AidError::Unauthorized`] - If quota is exceeded.
+    pub fn batch_create_aid(
+        env: Env,
+        donor: Address,
+        token: Address,
+        allocations: Vec<BatchAidAllocation>,
+    ) -> Result<Vec<u64>, AidError> {
+        if is_paused(&env) {
+            return Err(AidError::Paused);
+        }
+        donor.require_auth();
+
+        if allocations.is_empty() {
+            return Err(AidError::EmptyBatch);
+        }
+        if allocations.len() > MAX_BATCH_SIZE {
+            return Err(AidError::BatchTooLarge);
+        }
+
+        let configured_token = storage::get_token(&env).ok_or(AidError::NotFound)?;
+        if token != configured_token {
+            return Err(AidError::InvalidArgument);
+        }
+
+        // Fast-path: pre-validate all entries and compute total sum before state changes
+        let current_ledger = env.ledger().sequence();
+        let mut total_amount: i128 = 0;
+
+        for alloc in allocations.iter() {
+            if alloc.amount <= 0 {
+                return Err(AidError::InvalidArgument);
+            }
+            if alloc.expiry_ledger <= current_ledger {
+                return Err(AidError::InvalidArgument);
+            }
+            total_amount = total_amount
+                .checked_add(alloc.amount)
+                .ok_or(AidError::InvalidArgument)?;
+        }
+
+        // Quota enforcement: fail-open when unconfigured
+        if let Err(e) =
+            shared::quota::check_and_consume(&env, &donor, &symbol_short!("aid_crt"), total_amount)
+        {
+            if e == shared::Error::QuotaExceeded {
+                return Err(AidError::Unauthorized);
+            }
+        }
+
+        let mut aid_id = get_aid_counter(&env);
+        let mut ids = Vec::new(&env);
+
+        for alloc in allocations.iter() {
+            if has_aid(&env, aid_id) {
+                return Err(AidError::InvalidArgument);
+            }
+
+            let record = AidRecord {
+                id: aid_id,
+                donor: donor.clone(),
+                recipient: alloc.recipient.clone(),
+                token: token.clone(),
+                amount: alloc.amount,
+                expiry_ledger: alloc.expiry_ledger,
+                status: AidStatus::Pending,
+            };
+
+            set_aid(&env, aid_id, &record);
+            storage::append_recipient_aid(&env, &alloc.recipient, aid_id);
+
+            emit_aid_created(
+                &env,
+                &correlation::zero_correlation_id(&env),
+                aid_id,
+                &donor,
+                &alloc.recipient,
+                alloc.amount,
+                current_ledger.into(),
+                alloc.expiry_ledger.into(),
+            );
+
+            emit(
+                &env,
+                AID_CREATED,
+                (
+                    aid_id,
+                    donor.clone(),
+                    alloc.recipient.clone(),
+                    alloc.amount,
+                    alloc.expiry_ledger,
+                    correlation::zero_correlation_id(&env),
+                ),
+            );
+
+            ids.push_back(aid_id);
+            aid_id = aid_id.wrapping_add(1);
+        }
+
+        // Update indexes and counter
+        storage::append_donor_aids(&env, &donor, &ids);
+        index_aids(&env, &ids);
+        set_aid_counter(&env, aid_id);
+
+        emit_action_executed(
+            &env,
+            &correlation::zero_correlation_id(&env),
+            symbol_short!("aid"),
+            symbol_short!("batch_crt"),
+            &env.current_contract_address(),
+            true,
+            env.ledger().timestamp(),
+        );
+
+        // Consolidated escrow transfer from donor into contract for sum(amounts)
+        token::Client::new(&env, &token).transfer(
+            &donor,
+            &env.current_contract_address(),
+            &total_amount,
+        );
+
+        Ok(ids)
     }
 
     // -----------------------------------------------------------------------
@@ -929,6 +1080,20 @@ fn index_aid(env: &Env, aid_id: u64) {
     let mut ids = storage::get_search_index(env);
     if !contains_id(&ids, aid_id) {
         ids.push_back(aid_id);
+        storage::set_search_index(env, &ids);
+    }
+}
+
+fn index_aids(env: &Env, new_ids: &Vec<u64>) {
+    let mut ids = storage::get_search_index(env);
+    let mut modified = false;
+    for aid_id in new_ids.iter() {
+        if !storage::is_search_hidden(env, aid_id) && !contains_id(&ids, aid_id) {
+            ids.push_back(aid_id);
+            modified = true;
+        }
+    }
+    if modified {
         storage::set_search_index(env, &ids);
     }
 }
