@@ -51,6 +51,7 @@ commands, the decision points, and the rollback / mitigation paths.
 | Escrow / payments | `PaymentEscrow*` (700–710) | Stuck or double release | §3.6 |
 | Quota / abuse | `QuotaExceeded` (22) by many actors | Legit users blocked | §3.7 |
 | Bulk imports | `BatchTooLarge` (940), `InvalidRow` (944), `DuplicateExternalId` (943) | Failed dataset ingest | §3.8 |
+| Metadata retention | Unminimized leak, premature purge, hold collision | Lost audit / PII leak | §3.9 |
 
 Error codes are defined in [`shared/src/errors.rs`](../shared/src/errors.rs).
 
@@ -158,6 +159,13 @@ soroban contract invoke --id "$CONTRACT_ID" --network "$NETWORK" \
 **Decision:** reset a falsely-blocked actor (`reset_quota`) or raise limits with
 `set_quota_config`. Treat a broad `QuotaExceeded` spike as an abuse signal and
 escalate to security.
+
+### 3.8 Operational metadata retention & minimization
+
+For operational metadata data minimization reviews, retention enforcement, holds, and testable cleanup procedures across Treasury, Aid, Referral, Governance, Oracle, and Marketplace modules, follow [`docs/OPERATIONAL_METADATA_RETENTION.md`](./OPERATIONAL_METADATA_RETENTION.md).
+
+- **Hold emergency**: Place an indefinite hold (`place_operational_hold`) to protect disputed operational metadata from automated cleanup runs.
+- **Accidental override**: Clear or reset custom retention policy override to restore safe compile-time defaults.
 
 ---
 
