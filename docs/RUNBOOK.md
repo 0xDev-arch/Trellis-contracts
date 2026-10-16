@@ -51,6 +51,7 @@ commands, the decision points, and the rollback / mitigation paths.
 | Escrow / payments | `PaymentEscrow*` (700–710) | Stuck or double release | §3.6 |
 | Quota / abuse | `QuotaExceeded` (22) by many actors | Legit users blocked | §3.7 |
 | Bulk imports | `BatchTooLarge` (940), `InvalidRow` (944), `DuplicateExternalId` (943) | Failed dataset ingest | §3.8 |
+| Stale projections | Inconsistent search, pagination, or balance cache | Phantom records, inaccurate UI/queries | §3.9 |
 
 Error codes are defined in [`shared/src/errors.rs`](../shared/src/errors.rs).
 
@@ -198,6 +199,33 @@ When a bulk import (`import_aids`) encounters invalid rows or duplicate collisio
    to safely skip previously imported records.
 
 See [`IMPORT_PIPELINE.md`](./IMPORT_PIPELINE.md) for complete validation rules and runbooks.
+
+### 3.9 Stale cache and index detection & repair
+
+When derived secondary indexes or cached aggregate projections drift out of sync with canonical state:
+
+1. **Preview Stale Projections (Dry-Run)**:
+   Invoke detection with `dry_run = true` across the affected module (`treasury`, `aid`, `referral`, `gov`, `oracle`, `market`):
+   ```rust
+   let receipt = shared::projection_repair::execute_or_queue_projection_repair(
+       &env,
+       ProjectionModule::Aid,
+       &detected_items,
+       true, // dry_run
+   )?;
+   ```
+2. **Immediate vs Queued Repairs**:
+   - Batches with $\le 10$ items are repaired immediately in-transaction.
+   - Larger batches are automatically queued for background crank workers via `shared::jobs`.
+   - Critical financial discrepancies (e.g. Treasury category balance vs actual tokens) are automatically quarantined.
+3. **Worker Queue Draining**:
+   Process pending repair queue items using `shared::projection_repair::process_queued_repair`.
+4. **Repair Rollback**:
+   If a repair caused unexpected downstream regressions, instantly restore previous state using:
+   ```rust
+   let rollback_receipt = shared::projection_repair::rollback_projection_repair(&env, receipt_id)?;
+   ```
+   See [`STALE_PROJECTION_REPAIR.md`](./STALE_PROJECTION_REPAIR.md) for detailed architectural specifications.
 
 ## 5. Emergency rollback
 

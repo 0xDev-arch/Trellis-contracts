@@ -79,5 +79,14 @@
     "migration_notes": "",
     "issue": 217,
     "pr": null
+  },
+  {
+    "version": "unreleased",
+    "date": "2026-10-16",
+    "impact": "compatible",
+    "summary": "Added stale-cache and stale-index detection with automated repair recommendations, operator evidence receipts, and rollback support across Treasury, Aid, Referral, Governance, Oracle, and Marketplace modules (Issue #252).",
+    "migration_notes": "",
+    "issue": 252,
+    "pr": null
   }
 ]

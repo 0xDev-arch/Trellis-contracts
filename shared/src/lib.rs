@@ -32,6 +32,7 @@ pub mod pagination;
 pub mod payments;
 pub mod policy;
 pub mod preflight;
+pub mod projection_repair;
 pub mod quota;
 pub mod reconciliation;
 pub mod recovery;
@@ -177,6 +178,17 @@ pub use preflight::{
     PreflightInput, PreflightOperation, PreflightReport, PreflightStatus, RiskLevel,
     EXPIRY_WARNING_WINDOW_LEDGERS, HIGH_VALUE_WARNING_BPS,
 };
+pub use projection_repair::{
+    default_monitor_config, detect_cache_drift, detect_index_drift,
+    execute_or_queue_projection_repair, get_latest_audit_receipt, get_monitor_config,
+    get_pending_queue_count, get_queued_item, process_queued_repair, recommend_repair,
+    rollback_projection_repair, set_monitor_config, ProjectionAuditReceipt,
+    ProjectionKind, ProjectionModule, ProjectionMonitorConfig, ProjectionRepairAction,
+    ProjectionRepairError, ProjectionRepairQueueItem, ProjectionRepairSnapshot, ProjectionScope,
+    ProjectionStalenessSeverity, RepairActionOutcome, RepairRecommendation, StaleDriftKind,
+    StaleProjectionItem, DEFAULT_MAX_IMMEDIATE_REPAIRS, DEFAULT_MAX_LAG_LEDGERS,
+    DEFAULT_REBUILD_THRESHOLD_PCT,
+};
 pub use quota::{
     check_and_consume, get_quota_config, get_quota_status, get_usage, reset_quota,
     set_quota_config, QuotaConfig, QuotaStatus, QuotaUsage,
@@ -250,6 +262,8 @@ mod test_sanitize;
 mod test_storage;
 #[cfg(test)]
 mod test_timeline;
+#[cfg(test)]
+mod test_projection_repair;
 
 // Deterministic ledger-sequence harness controls (Issue #156). Test-only: the
 // harness sets the ledger sequence/timestamp explicitly and never reads the
