@@ -207,6 +207,31 @@ When a bulk import (`import_aids`) encounters invalid rows or duplicate collisio
 
 See [`IMPORT_PIPELINE.md`](./IMPORT_PIPELINE.md) for complete validation rules and runbooks.
 
+### 3.9 Feature rollout guard & rollback verification
+
+When an alert reports an automatic rollback (`AutomaticRollbackTriggered` 963) or degraded rollout health:
+
+1. **Check Rollout Guard Status**:
+   ```bash
+   soroban contract invoke \
+     --id "$CONTRACT_ID" --network "$NETWORK" --source-account "$READ_ONLY_ACCOUNT" \
+     -- get_guard_config --target "$TARGET_SYMBOL"
+   ```
+   Confirm that `stage` is `RolledBack` and `rollout_bps` is `0`.
+2. **Review Rollback Audit**:
+   Inspect the stored `RollbackAuditRecord` for `reason` (e.g. `ConsecutiveFailuresExceeded`, `ErrorRateBreached`, `InvariantViolation`) and `failing_error_code`.
+3. **Execute Post-Rollback Verification**:
+   ```bash
+   soroban contract invoke \
+     --id "$CONTRACT_ID" --network "$NETWORK" --source-account "$ADMIN_ACCOUNT" \
+     -- verify_rollback --target "$TARGET_SYMBOL"
+   ```
+   Confirm `verified_clean: true`. If `verified_clean: false`, check `anomaly` (such as `SolvencyDiscrepancy` or `OrphanedPartialRecord`) and run module remediation before re-enabling.
+4. **Re-arming Protection**:
+   Do not attempt to re-enable the feature until `verify_rollback` has confirmed a clean state.
+
+See [`FEATURE_FLAG_ROLLOUT_GUARD.md`](./FEATURE_FLAG_ROLLOUT_GUARD.md) for complete details.
+
 ## 5. Emergency rollback
 
 Use when a release causes incorrect state changes or blocks critical
@@ -268,6 +293,7 @@ post-incident note: root cause, detection gap, and follow-up issues.
 
 ## 6. Reference
 
+- [`FEATURE_FLAG_ROLLOUT_GUARD.md`](./FEATURE_FLAG_ROLLOUT_GUARD.md) — feature-flag rollout guard, automatic rollback triggers, and verification receipts.
 - [`IMPORT_PIPELINE.md`](./IMPORT_PIPELINE.md) — bulk import validation, dry-run simulation, and remediation runbooks.
 - [`DIAGNOSTICS.md`](./DIAGNOSTICS.md) — diagnostic tooling details.
 - [`QUOTA.md`](./QUOTA.md) — quota limits and override procedure.
