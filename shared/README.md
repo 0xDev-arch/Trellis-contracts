@@ -76,6 +76,7 @@ than once.
 | `shared::config` | Typed env validation (`validate_full_config`, `Environment`), `UnsafeSecret` / `ConfigMissing` fail-fast errors, `RedactedSecret` previews that never print full secrets | `docs/CONFIGURATION.md` |
 | `shared::timeline` | User-facing activity timeline: `Public` / `Participant` / `Maintainer` visibility filtering, stable `ResourceLink` anchors, cursor pagination, and a maintainer-only audit store that is structurally separate from the user timeline | `docs/TIMELINE.md` |
 | `shared::ledger_sequence` | Test-only deterministic ledger control (`LedgerSequenceHarness`): explicit sequence plus derived timestamp, forward-only `at()`, and `order_of` / `classify` boundary classification for same-ledger, next-ledger, expired-ledger and out-of-order submissions | `docs/LEDGER_ASSUMPTIONS.md` |
+| `shared::rollout_guard` | Feature-flag rollout guard with telemetry monitoring, automated rollback triggers (consecutive failures, error rates, invariant breaches), clean state verification across Treasury, Aid, Referral, Governance, Oracle, and Marketplace, and re-arming protection | `docs/FEATURE_FLAG_ROLLOUT_GUARD.md` |
 
 Ledger boundary tests run with `cargo test -p shared --lib test_ledger_sequence`
 (see `docs/LEDGER_ASSUMPTIONS.md` for the boundary table and determinism rules).

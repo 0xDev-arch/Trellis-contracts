@@ -79,5 +79,14 @@
     "migration_notes": "",
     "issue": 217,
     "pr": null
+  },
+  {
+    "version": "unreleased",
+    "date": "2026-10-16",
+    "impact": "compatible",
+    "summary": "Added feature-flag rollout guard with telemetry monitoring, automated rollback triggers, and clean state verification across Treasury, Aid, Referral, Governance, Oracle, and Marketplace modules (Issue #239).",
+    "migration_notes": "",
+    "issue": 239,
+    "pr": null
   }
 ]

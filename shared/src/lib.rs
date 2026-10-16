@@ -36,6 +36,7 @@ pub mod quota;
 pub mod reconciliation;
 pub mod recovery;
 pub mod replay;
+pub mod rollout_guard;
 pub mod retention;
 pub mod sanitize;
 pub mod semantic;
@@ -190,6 +191,15 @@ pub use recovery::{
     RecoveryStep, StepOutcome,
 };
 pub use replay::{consume_payload, ReplayKey, SignedPayload};
+pub use rollout_guard::{
+    default_guard_config, evaluate_rollout_guard, get_guard_config, get_health_metrics,
+    get_last_rollback_audit, get_last_verification_receipt, init_or_update_guard,
+    is_rollback_verified, rearm_after_verified_rollback, record_execution_outcome,
+    trigger_auto_rollback, verify_rollback, GuardDecision, GuardHealthStatus,
+    ModuleConsistencySnapshot, RollbackAuditRecord, RollbackReason, RollbackVerificationReceipt,
+    RolloutGuardConfig, RolloutHealthMetrics, RolloutModule, RolloutStage, RolloutTarget,
+    StateAnomalyKind,
+};
 pub use retention::{
     active_hold, apply_cleanup, class_label, classify, days_to_ledgers, default_policy,
     get_effective_policy, get_hold, get_record, get_retention_policy, is_frozen, place_hold,
