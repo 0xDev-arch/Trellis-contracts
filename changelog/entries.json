@@ -70,5 +70,14 @@
     "migration_notes": "",
     "issue": 192,
     "pr": null
+  },
+  {
+    "version": "unreleased",
+    "date": "2026-10-16",
+    "impact": "compatible",
+    "summary": "Added operator-safe backfill tool with dry-run diff preview, resumable checkpoints, rollback support, and detailed skipped/failed record reporting across treasury, aid, referral, governance, oracle, and marketplace modules (Issue #217).",
+    "migration_notes": "",
+    "issue": 217,
+    "pr": null
   }
 ]

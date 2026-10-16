@@ -3,6 +3,7 @@
 pub mod abuse;
 pub mod analytics;
 pub mod auth;
+pub mod backfill;
 pub mod batch;
 pub mod canonical;
 pub mod client;
@@ -57,6 +58,12 @@ pub use auth::{
     get_pending_ownership_transfer, has_permission, initialize_admin, propose_ownership_transfer,
     require_admin, require_not_paused, require_permission, role_for_permission, set_admin,
     PendingOwnershipTransfer, Permission, Role,
+};
+pub use backfill::{
+    advance_checkpoint, begin_backfill, clear_checkpoint, complete_backfill, dry_run as dry_run_backfill,
+    fail_backfill, is_resumable as is_backfill_resumable, load_checkpoint as load_backfill_checkpoint,
+    save_checkpoint as save_backfill_checkpoint, BackfillAction, BackfillCheckpoint, BackfillError,
+    BackfillItem, BackfillMode, BackfillModule, BackfillPlan, BackfillReport, BackfillStatus,
 };
 pub use batch::{
     batch_invoke_no_args, execute_multi_invoke, execute_multi_transfer, multi_transfer_all,
