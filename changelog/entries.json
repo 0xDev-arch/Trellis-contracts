@@ -79,5 +79,14 @@
     "migration_notes": "",
     "issue": 217,
     "pr": null
+  },
+  {
+    "version": "unreleased",
+    "date": "2026-10-16",
+    "impact": "compatible",
+    "summary": "Added data minimization review and retention enforcement for operational metadata across Treasury, Aid, Referral, Governance, Oracle, and Marketplace modules with testable two-phase deletion, hold management, and migration adapters (Issue #229).",
+    "migration_notes": "",
+    "issue": 229,
+    "pr": null
   }
 ]

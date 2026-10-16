@@ -75,6 +75,7 @@ than once.
 | `shared::quota` | Per-actor `(actor, resource)` quota enforcement (`check_and_consume`), maintainer `get_quota_status` / `reset_quota` diagnostics, fail-open when unconfigured | `docs/QUOTA.md` |
 | `shared::config` | Typed env validation (`validate_full_config`, `Environment`), `UnsafeSecret` / `ConfigMissing` fail-fast errors, `RedactedSecret` previews that never print full secrets | `docs/CONFIGURATION.md` |
 | `shared::timeline` | User-facing activity timeline: `Public` / `Participant` / `Maintainer` visibility filtering, stable `ResourceLink` anchors, cursor pagination, and a maintainer-only audit store that is structurally separate from the user timeline | `docs/TIMELINE.md` |
+| `shared::operational_metadata` | Data minimization review and retention enforcement for operational metadata across Treasury, Aid, Referral, Governance, Oracle, and Marketplace modules with testable two-phase deletion, hold management, and migration adapters | `docs/OPERATIONAL_METADATA_RETENTION.md` |
 | `shared::ledger_sequence` | Test-only deterministic ledger control (`LedgerSequenceHarness`): explicit sequence plus derived timestamp, forward-only `at()`, and `order_of` / `classify` boundary classification for same-ledger, next-ledger, expired-ledger and out-of-order submissions | `docs/LEDGER_ASSUMPTIONS.md` |
 
 Ledger boundary tests run with `cargo test -p shared --lib test_ledger_sequence`

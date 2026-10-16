@@ -28,6 +28,7 @@ pub mod lifecycle;
 pub mod lifecycle_events;
 pub mod math;
 pub mod migration;
+pub mod operational_metadata;
 pub mod pagination;
 pub mod payments;
 pub mod policy;
@@ -162,6 +163,17 @@ pub use migration::{
     finish_migration, is_resumable, load_journal, mark_step_complete, resume_index, save_journal,
     DryRunReport, MigrationError, MigrationJournal, MigrationPlan, MigrationStatus, MigrationStep,
     MigrationStepKind, PostCheck, PostCheckReport, RollbackStrategy,
+};
+pub use operational_metadata::{
+    active_operational_hold, apply_operational_cleanup, classify_field,
+    default_operational_policy, get_effective_operational_policy, get_operational_hold,
+    get_operational_metadata, get_operational_retention_policy, has_operational_metadata,
+    minimize_legacy_metadata, plan_operational_cleanup, plan_operational_cleanup_at,
+    place_operational_hold, release_operational_hold, review_and_minimize,
+    set_operational_retention_policy, store_operational_metadata, to_shared_retention_record,
+    FieldSensitivity, MetadataClass, MinimizedField, MinimizationReviewResult,
+    OperationalCleanupPlan, OperationalCleanupReport, OperationalHold, OperationalModule,
+    OperationalRetentionPolicy, RawMetadataField, StoredOperationalMetadata,
 };
 pub use pagination::{
     paginate_id_list, paginate_id_range, Direction, PageRequest, PageResponse, DEFAULT_MAX_SCAN,
