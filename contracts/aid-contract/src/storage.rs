@@ -146,6 +146,15 @@ pub fn append_donor_aid(env: &Env, donor: &Address, aid_id: u64) {
     persistent_set(env, &DataKey::DonorAids(donor.clone()), &ids);
 }
 
+/// Append multiple `aid_ids` to `donor`'s index in a single storage write.
+pub fn append_donor_aids(env: &Env, donor: &Address, new_ids: &Vec<u64>) {
+    let mut ids = get_donor_aids(env, donor);
+    for id in new_ids.iter() {
+        ids.push_back(id);
+    }
+    persistent_set(env, &DataKey::DonorAids(donor.clone()), &ids);
+}
+
 /// Read the full list of aid IDs assigned to `recipient`.
 pub fn get_recipient_aids(env: &Env, recipient: &Address) -> Vec<u64> {
     persistent_get(env, &DataKey::RecipientIndex(recipient.clone()))

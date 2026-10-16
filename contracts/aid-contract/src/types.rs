@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Vec};
+use soroban_sdk::{contracttype, Address, Symbol, Vec};
 
 /// Contract configuration stored in instance storage.
 #[contracttype]
@@ -8,6 +8,16 @@ pub struct Config {
     pub treasury: Address,
     pub token: Address,
     pub default_expiry_secs: u64,
+}
+
+/// A single allocation within a batch aid disbursement request.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchAidAllocation {
+    pub recipient: Address,
+    pub amount: i128,
+    pub purpose: Symbol,
+    pub expiry_ledger: u32,
 }
 
 /// Lifecycle state of an aid record.
